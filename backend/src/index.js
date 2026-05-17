@@ -69,9 +69,25 @@ const app = express();
 
 // Middleware
 app.use(helmet());
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  /\.vercel\.app$/,           // any *.vercel.app subdomain
+  /\.atom-quest.*\.vercel\.app$/, // your specific Vercel project
+];
+if (process.env.FRONTEND_URL) ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    const allowed = ALLOWED_ORIGINS.some(o =>
+      typeof o === 'string' ? o === origin : o.test(origin)
+    );
+    if (allowed) return callback(null, true);
+    return callback(new Error(`CORS: ${origin} not allowed`));
+  },
+  credentials: true,
 }));
 
 const authLimiter = rateLimit({
@@ -150,9 +166,17 @@ const { Server } = require('socket.io');
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-    methods: ["GET", "POST"]
-  }
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = ALLOWED_ORIGINS.some(o =>
+        typeof o === 'string' ? o === origin : o.test(origin)
+      );
+      if (allowed) return callback(null, true);
+      return callback(new Error(`CORS: ${origin} not allowed`));
+    },
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
 });
 
 // Store io globally for controllers to access
