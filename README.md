@@ -175,5 +175,5 @@ MIT
 ---
 
 <div align="center">
-<strong>Built for AtomQuest Hackathon 2025</strong>
+<strong>Built for AtomQuest Hackathon 2026</strong>
 </div>
