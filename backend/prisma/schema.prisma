@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// SQLite does not support enums, so we use String fields.
+// Valid values are enforced at the application layer via constants.js.
+// When migrating to Postgres for production, these can be converted to enum types.
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         String   @default("EMPLOYEE") // EMPLOYEE | MANAGER | ADMIN
+  department   String?
+  managerId    String?
+  manager      User?    @relation("ManagerEmployee", fields: [managerId], references: [id])
+  subordinates User[]   @relation("ManagerEmployee")
+  goals        Goal[]
+  comments     CheckinComment[]
+  auditLogs    AuditLog[]
+  escalationLogs EscalationLog[]
+  createdAt    DateTime @default(now())
+
+  @@index([role])
+  @@index([managerId])
+}
+
+model GoalCycle {
+  id          String       @id @default(uuid())
+  year        Int
+  phase       String       // GOAL_SETTING | Q1 | Q2 | Q3 | Q4
+  windowOpen  DateTime
+  windowClose DateTime
+  isActive    Boolean      @default(false)
+  goals       Goal[]
+  achievements Achievement[]
+  createdAt   DateTime     @default(now())
+
+  @@index([phase])
+  @@index([isActive])
+}
+
+model Goal {
+  id           String        @id @default(uuid())
+  employeeId   String
+  employee     User          @relation(fields: [employeeId], references: [id])
+  cycleId      String
+  cycle        GoalCycle     @relation(fields: [cycleId], references: [id])
+  sharedFromId String?
+  thrustArea   String
+  title        String
+  description  String?
+  uom          String        // MIN | MAX | TIMELINE | ZERO
+  target       Float
+  weightage    Float
+  status       String        @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REWORK
+  isLocked     Boolean       @default(false)
+  achievements Achievement[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+
+  @@index([employeeId])
+  @@index([cycleId])
+  @@index([status])
+  @@index([sharedFromId])
+}
+
+model Achievement {
+  id            String           @id @default(uuid())
+  goalId        String
+  goal          Goal             @relation(fields: [goalId], references: [id])
+  cycleId       String
+  cycle         GoalCycle        @relation(fields: [cycleId], references: [id])
+  actualValue   Float?
+  progressScore Float?
+  status        String           @default("NOT_STARTED") // NOT_STARTED | ON_TRACK | COMPLETED
+  comments      CheckinComment[]
+  updatedAt     DateTime         @updatedAt
+
+  @@index([goalId])
+  @@index([cycleId])
+  @@unique([goalId, cycleId])
+}
+
+model CheckinComment {
+  id            String      @id @default(uuid())
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  managerId     String
+  manager       User        @relation(fields: [managerId], references: [id])
+  comment       String
+  createdAt     DateTime    @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  goalId     String
+  goal       Goal     @relation(fields: [goalId], references: [id])
+  changedBy  String
+  user       User     @relation(fields: [changedBy], references: [id])
+  actionType String
+  fieldName  String
+  oldValue   String?
+  newValue   String?
+  changedAt  DateTime @default(now())
+
+  @@index([goalId])
+  @@index([changedBy])
+}
+
+model EscalationLog {
+  id          String   @id @default(uuid())
+  type        String
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  message     String
+  triggeredAt DateTime @default(now())
+
+  @@index([userId])
+}

@@ -1,0 +1,24 @@
+{
+  "ci": {
+    "collect": {
+      "numberOfRuns": 3,
+      "staticDistDir": "./dist"
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["error", {"minScore": 0.9}],
+        "categories:accessibility": ["warn", {"minScore": 0.9}],
+        "categories:best-practices": ["warn", {"minScore": 0.9}],
+        "categories:seo": ["warn", {"minScore": 0.9}],
+        "categories:pwa": ["warn", {"minScore": 0.8}],
+        "first-contentful-paint": ["error", {"maxNumericValue": 1500}],
+        "interactive": ["error", {"maxNumericValue": 3000}],
+        "resource-summary:document:size": ["warn", {"maxNumericValue": 14000}],
+        "resource-summary:script:size": ["error", {"maxNumericValue": 500000}]
+      }
+    },
+    "upload": {
+      "target": "temporary-public-storage"
+    }
+  }
+}

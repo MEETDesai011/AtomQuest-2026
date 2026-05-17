@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+frontend/dist/
+backend/dist/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Database files
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+combined.log
+error.log
+logs/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Terraform state
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform/
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Misc
+*.tgz
+*.tar.gz
+.cache/
