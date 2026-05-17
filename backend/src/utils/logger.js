@@ -1,25 +1,40 @@
 const winston = require('winston');
 
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'goal-portal-api' },
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-  ],
-});
+const isProd = process.env.NODE_ENV === 'production';
 
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    ),
-  }));
-}
+/**
+ * Logger configuration.
+ *
+ * Production (Render):  Console-only JSON output — Render captures stdout/stderr
+ *                       and surfaces them in the log dashboard. File transports
+ *                       would fail on Render's read-only filesystem.
+ *
+ * Development (local):  Console with colours + pretty format for readability.
+ */
+const transports = [
+  new winston.transports.Console({
+    format: isProd
+      ? winston.format.combine(
+          winston.format.timestamp(),
+          winston.format.json()           // structured JSON → Render log aggregator
+        )
+      : winston.format.combine(
+          winston.format.colorize(),
+          winston.format.timestamp({ format: 'HH:mm:ss' }),
+          winston.format.printf(({ timestamp, level, message, ...meta }) => {
+            const extras = Object.keys(meta).length
+              ? ' ' + JSON.stringify(meta)
+              : '';
+            return `${timestamp} ${level}: ${message}${extras}`;
+          })
+        ),
+  }),
+];
+
+const logger = winston.createLogger({
+  level: isProd ? 'info' : 'debug',
+  defaultMeta: { service: 'goal-portal-api' },
+  transports,
+});
 
 module.exports = logger;

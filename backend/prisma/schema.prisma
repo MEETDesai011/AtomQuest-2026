@@ -1,15 +1,17 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Binary targets required for Render (Debian Linux) and local Windows dev
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  // PostgreSQL for production (Render). Set DATABASE_URL to a postgres:// connection string.
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// SQLite does not support enums, so we use String fields.
-// Valid values are enforced at the application layer via constants.js.
-// When migrating to Postgres for production, these can be converted to enum types.
+// String fields are used instead of enums for cross-DB compatibility.
+// Values are enforced at the application layer via constants.js.
 
 model User {
   id           String   @id @default(uuid())

@@ -1,9 +1,22 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const jwt    = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 
 const prisma = new PrismaClient();
 
+// ──────────────────────────────────────────────
+// Google OAuth2 client — initialised once
+// ──────────────────────────────────────────────
+const GOOGLE_CLIENT_ID =
+  process.env.GOOGLE_CLIENT_ID ||
+  '607774260786-fdocdfgjq2mvual4vi3v62ji2vs8427u.apps.googleusercontent.com';
+
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// ──────────────────────────────────────────────
+// Email / password login
+// ──────────────────────────────────────────────
 async function login(email, password) {
   const user = await prisma.user.findUnique({ where: { email } });
 
@@ -23,40 +36,51 @@ async function login(email, password) {
   return generateAuthResponse(user);
 }
 
+// ──────────────────────────────────────────────
+// Google Sign-In
+// ──────────────────────────────────────────────
 async function googleLogin(googleToken) {
-  // Verify Google token using Google's tokeninfo endpoint
-  const { OAuth2Client } = require('google-auth-library');
-  const GOOG_ID = process.env.GOOGLE_CLIENT_ID || '607774260786-fdocdfgjq2mvual4vi3v62ji2vs8427u.apps.googleusercontent.com';
-  const client = new OAuth2Client(GOOG_ID);
+  if (!googleToken) {
+    const error = new Error('Google credential token is required');
+    error.statusCode = 400;
+    throw error;
+  }
 
   let payload;
   try {
-    const ticket = await client.verifyIdToken({
-      idToken: googleToken,
-      audience: GOOG_ID,
+    const ticket = await googleClient.verifyIdToken({
+      idToken:  googleToken,
+      audience: GOOGLE_CLIENT_ID,
     });
     payload = ticket.getPayload();
   } catch (err) {
-    const error = new Error('Invalid Google token');
+    // Do NOT leak the raw verification error — it may contain sensitive info
+    const error = new Error('Invalid or expired Google token');
     error.statusCode = 401;
     throw error;
   }
 
-  const { email, name, picture, sub: googleId } = payload;
+  if (!payload || !payload.email) {
+    const error = new Error('Google token payload is missing required fields');
+    error.statusCode = 401;
+    throw error;
+  }
 
-  // Find existing user or create new one
+  const { email, name, sub: googleId } = payload;
+
+  // Find or auto-create the user
   let user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
-    // Auto-create user from Google sign-in (default role: EMPLOYEE)
+    // Create a new user from Google sign-in (default role: EMPLOYEE)
     const hash = await bcrypt.hash(googleId + process.env.JWT_SECRET, 10);
     user = await prisma.user.create({
       data: {
-        name: name || email.split('@')[0],
+        name:         name || email.split('@')[0],
         email,
         passwordHash: hash,
-        role: 'EMPLOYEE',
-        department: 'General',
+        role:         'EMPLOYEE',
+        department:   'General',
       },
     });
   }
@@ -64,42 +88,20 @@ async function googleLogin(googleToken) {
   return generateAuthResponse(user);
 }
 
-function generateAuthResponse(user) {
-  const tokenPayload = {
-    userId: user.id,
-    role: user.role,
-    name: user.name,
-    email: user.email,
-    department: user.department,
-  };
-
-  const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
-    expiresIn: '7d',
-  });
-
-  return {
-    token,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      department: user.department,
-    },
-  };
-}
-
+// ──────────────────────────────────────────────
+// Get authenticated user profile
+// ──────────────────────────────────────────────
 async function getMe(userId) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
+      id:         true,
+      name:       true,
+      email:      true,
+      role:       true,
       department: true,
-      managerId: true,
-      createdAt: true,
+      managerId:  true,
+      createdAt:  true,
     },
   });
 
@@ -110,6 +112,34 @@ async function getMe(userId) {
   }
 
   return user;
+}
+
+// ──────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────
+function generateAuthResponse(user) {
+  const tokenPayload = {
+    userId:     user.id,
+    role:       user.role,
+    name:       user.name,
+    email:      user.email,
+    department: user.department,
+  };
+
+  const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+    expiresIn: '7d',
+  });
+
+  return {
+    token,
+    user: {
+      id:         user.id,
+      name:       user.name,
+      email:      user.email,
+      role:       user.role,
+      department: user.department,
+    },
+  };
 }
 
 module.exports = { login, googleLogin, getMe };

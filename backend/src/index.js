@@ -3,50 +3,17 @@ require('dotenv').config();
 // Enforce IST Timezone globally for the backend
 process.env.TZ = 'Asia/Kolkata';
 
-// Vercel read-only filesystem hack for SQLite
-if (process.env.VERCEL) {
-  const fs = require('fs');
-  const path = require('path');
-  const tmpDbPath = '/tmp/dev.db';
-  
-  // Vercel serverless bundles can flatten directories or keep them intact. Check both.
-  const possiblePaths = [
-    path.join(__dirname, '../prisma/dev.db'), // Normal structure
-    path.join(process.cwd(), 'prisma/dev.db'), // From working directory
-    path.join(__dirname, 'prisma/dev.db') // Flattened
-  ];
-  
-  let originalDbPath = null;
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      originalDbPath = p;
-      break;
-    }
-  }
-  
-  try {
-    if (!fs.existsSync(tmpDbPath)) {
-      if (originalDbPath) {
-        fs.copyFileSync(originalDbPath, tmpDbPath);
-        console.log(`Copied DB from ${originalDbPath} to ${tmpDbPath}`);
-      } else {
-        console.error('CRITICAL: dev.db not found in any expected location.');
-      }
-    }
-  } catch (err) {
-    console.error('Error copying DB:', err);
-  }
-  process.env.DATABASE_URL = `file:${tmpDbPath}`;
-}
-
-
 const { z } = require('zod');
 
-// Environment validation — server refuses to start if any are missing
+// ──────────────────────────────────────────────
+// Environment validation — server refuses to
+// start if required variables are missing.
+// ──────────────────────────────────────────────
 const envSchema = z.object({
-  DATABASE_URL: z.string(),
-  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
-  PORT: z.string().default("5000"),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  JWT_SECRET:   z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  PORT:         z.string().default('5000'),
+  NODE_ENV:     z.string().default('development'),
 });
 
 try {
@@ -57,74 +24,126 @@ try {
   process.exit(1);
 }
 
-const express = require('express');
-const cors = require('cors');
-const morgan = require('morgan');
-const helmet = require('helmet');
+const express   = require('express');
+const cors      = require('cors');
+const morgan    = require('morgan');
+const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 const errorHandler = require('./middleware/errorHandler');
-const logger = require('./utils/logger');
+const logger       = require('./utils/logger');
 
 const app = express();
 
-// Middleware
+// ──────────────────────────────────────────────
+// Security hardening
+// ──────────────────────────────────────────────
 app.use(helmet());
+
+// Render sits behind a proxy — trust the first hop so
+// express-rate-limit reads the real client IP correctly.
+app.set('trust proxy', 1);
+
+// ──────────────────────────────────────────────
+// CORS — allow Vercel frontend + local dev
+// ──────────────────────────────────────────────
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:3000',
-  /\.vercel\.app$/,           // any *.vercel.app subdomain
-  /\.atom-quest.*\.vercel\.app$/, // your specific Vercel project
+  'https://atom-quest-2026.vercel.app',  // production frontend
+  /\.vercel\.app$/,                       // any *.vercel.app preview deploy
 ];
-if (process.env.FRONTEND_URL) ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
 
-app.use(cors({
+// Allow any additional origin specified via env (e.g. custom domain)
+if (process.env.FRONTEND_URL) {
+  ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
+}
+
+const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
+    // Allow requests with no Origin header (server-to-server, curl, Postman)
     if (!origin) return callback(null, true);
-    const allowed = ALLOWED_ORIGINS.some(o =>
+    const isAllowed = ALLOWED_ORIGINS.some(o =>
       typeof o === 'string' ? o === origin : o.test(origin)
     );
-    if (allowed) return callback(null, true);
-    return callback(new Error(`CORS: ${origin} not allowed`));
+    if (isAllowed) return callback(null, true);
+    return callback(new Error(`CORS: origin '${origin}' is not allowed`));
   },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
+app.use(cors(corsOptions));
+// Handle pre-flight for all routes
+app.options('*', cors(corsOptions));
+
+// ──────────────────────────────────────────────
+// Body parsing & request logging
+// ──────────────────────────────────────────────
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ──────────────────────────────────────────────
+// Rate limiting
+// ──────────────────────────────────────────────
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again after 15 minutes'
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: { success: false, error: 'Too many requests, please try again later.' },
 });
-app.use(express.json());
-app.use(morgan('dev'));
 
-// Health check
+// ──────────────────────────────────────────────
+// Bare /health — required by Render health check
+// and simple uptime monitors.
+// ──────────────────────────────────────────────
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// ──────────────────────────────────────────────
+// Detailed health check (existing — keep working)
+// ──────────────────────────────────────────────
 const healthController = require('./controllers/health.controller');
 app.get('/api/v1/health', healthController.checkHealth);
 
-// Prometheus Metrics
-const client = require('prom-client');
-const collectDefaultMetrics = client.collectDefaultMetrics;
-const Registry = client.Registry;
-const register = new Registry();
-collectDefaultMetrics({ register });
+// ──────────────────────────────────────────────
+// Prometheus metrics
+// ──────────────────────────────────────────────
+const client             = require('prom-client');
+const { Registry }       = client;
+const register           = new Registry();
+client.collectDefaultMetrics({ register });
 
 app.get('/metrics', async (req, res) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
 });
 
-// Swagger Documentation
-const swaggerUi = require('swagger-ui-express');
+// ──────────────────────────────────────────────
+// Swagger docs
+// ──────────────────────────────────────────────
+const swaggerUi   = require('swagger-ui-express');
 const swaggerSpecs = require('./swagger');
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpecs));
 
-// Public-ish route: any authenticated user can get cycles
+// ──────────────────────────────────────────────
+// Shared Prisma instance
+// ──────────────────────────────────────────────
 const { requireAuth } = require('./middleware/auth');
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+
+const prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'production'
+    ? ['error']
+    : ['query', 'warn', 'error'],
+});
+
 const { sendSuccess } = require('./utils/response');
 
+// Public-ish route: any authenticated user can get cycles
 app.get('/api/v1/cycles', requireAuth, async (req, res, next) => {
   try {
     const cycles = await prisma.goalCycle.findMany({ orderBy: { createdAt: 'desc' } });
@@ -132,72 +151,94 @@ app.get('/api/v1/cycles', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-const authRoutes = require('./routes/auth.routes');
-const goalRoutes = require('./routes/goal.routes');
-const managerRoutes = require('./routes/manager.routes');
+// ──────────────────────────────────────────────
+// Feature routes
+// ──────────────────────────────────────────────
+const authRoutes        = require('./routes/auth.routes');
+const goalRoutes        = require('./routes/goal.routes');
+const managerRoutes     = require('./routes/manager.routes');
 const achievementRoutes = require('./routes/achievement.routes');
-const adminRoutes = require('./routes/admin.routes');
-const analyticsRoutes = require('./routes/analytics.routes');
+const adminRoutes       = require('./routes/admin.routes');
+const analyticsRoutes   = require('./routes/analytics.routes');
 
-// Routes
-app.use('/api/v1/auth', authLimiter, authRoutes);
-app.use('/api/v1/goals', goalRoutes);
-app.use('/api/v1/manager', managerRoutes);
+app.use('/api/v1/auth',         authLimiter, authRoutes);
+app.use('/api/v1/goals',        goalRoutes);
+app.use('/api/v1/manager',      managerRoutes);
 app.use('/api/v1/achievements', achievementRoutes);
-app.use('/api/v1/admin', adminRoutes);
-app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/admin',        adminRoutes);
+app.use('/api/v1/analytics',    analyticsRoutes);
 
-// Centralized error handler — must be registered LAST
+// ──────────────────────────────────────────────
+// 404 catch-all
+// ──────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: `Route ${req.method} ${req.path} not found` });
+});
+
+// ──────────────────────────────────────────────
+// Centralized error handler — must be last
+// ──────────────────────────────────────────────
 app.use(errorHandler);
 
-// Start Cron Jobs
-const { startCron } = require('./cron/escalation');
-const { startSyntheticMonitor } = require('./cron/syntheticMonitor');
-const { startWeeklyAISummary } = require('./cron/weeklySummary');
-startCron();
-startSyntheticMonitor();
-startWeeklyAISummary();
+// ──────────────────────────────────────────────
+// Cron jobs (skip on test runs)
+// ──────────────────────────────────────────────
+if (process.env.NODE_ENV !== 'test') {
+  const { startCron }            = require('./cron/escalation');
+  const { startSyntheticMonitor } = require('./cron/syntheticMonitor');
+  const { startWeeklyAISummary }  = require('./cron/weeklySummary');
+  startCron();
+  startSyntheticMonitor();
+  startWeeklyAISummary();
+}
 
-const PORT = process.env.PORT || 5000;
-
-const http = require('http');
+// ──────────────────────────────────────────────
+// HTTP server + Socket.IO
+// ──────────────────────────────────────────────
+const http     = require('http');
 const { Server } = require('socket.io');
 
 const server = http.createServer(app);
+
 const io = new Server(server, {
-  cors: {
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const allowed = ALLOWED_ORIGINS.some(o =>
-        typeof o === 'string' ? o === origin : o.test(origin)
-      );
-      if (allowed) return callback(null, true);
-      return callback(new Error(`CORS: ${origin} not allowed`));
-    },
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
+  cors: corsOptions,
 });
 
-// Store io globally for controllers to access
+// Make io accessible in controllers
 global.io = io;
 
-io.on('connection', (socket) => {
-  logger.info(`🔌 Socket client connected: ${socket.id}`);
-  
+io.on('connection', socket => {
+  logger.info(`🔌 Socket connected: ${socket.id}`);
   socket.on('disconnect', () => {
-    logger.info(`🔌 Socket client disconnected: ${socket.id}`);
+    logger.info(`🔌 Socket disconnected: ${socket.id}`);
   });
 });
 
-// Only start listening when running locally (not on Vercel)
-if (!process.env.VERCEL) {
-  server.listen(PORT, () => {
-    logger.info(`🚀 Goal Portal API running on http://localhost:${PORT}`);
-    logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-    logger.info(`⚡ Socket.IO Layer initialized`);
-  });
-}
+// ──────────────────────────────────────────────
+// Start listening — Render (and local) both use
+// this path. process.env.PORT is always set on
+// Render; falls back to 5000 for local dev.
+// ──────────────────────────────────────────────
+const PORT = parseInt(process.env.PORT, 10) || 5000;
 
-// Export for Vercel serverless
-module.exports = app;
+server.listen(PORT, '0.0.0.0', () => {
+  logger.info(`🚀 AtomQuest API running on port ${PORT}`);
+  logger.info(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(`⚡ Socket.IO layer initialized`);
+});
+
+// Graceful shutdown
+const shutdown = async (signal) => {
+  logger.info(`${signal} received — shutting down gracefully`);
+  await prisma.$disconnect();
+  server.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+  // Force-kill after 10 s if connections are stuck
+  setTimeout(() => process.exit(1), 10_000).unref();
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
+
+module.exports = app; // kept for supertest / future serverless usage

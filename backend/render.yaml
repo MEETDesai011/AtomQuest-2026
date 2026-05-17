@@ -1,0 +1,66 @@
+# render.yaml — Infrastructure-as-Code for Render
+# Docs: https://render.com/docs/render-yaml-ref
+#
+# Deploy with:  render deploy  (or push to your connected GitHub repo)
+
+services:
+  # ── Web Service (Express + Socket.IO) ─────────────────────
+  - type: web
+    name: atomquest-backend
+    runtime: node
+    region: singapore          # closest region to India; change if needed
+    plan: free                 # upgrade to starter/standard for production SLAs
+
+    # Build phase — runs once per deploy
+    buildCommand: npm ci && npx prisma generate
+
+    # Start command — migrates schema then boots the server
+    startCommand: npm run start:prod
+
+    # Health check — Render pings this to confirm the service is alive
+    healthCheckPath: /health
+
+    # Auto-deploy on every push to the configured branch
+    autoDeploy: true
+
+    # Environment variables — set the VALUES in the Render dashboard.
+    # Only keys are listed here; never commit real secrets.
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        generateValue: false    # Render injects PORT automatically; listed for clarity
+
+      - key: DATABASE_URL
+        # Set this to the Render Internal Database URL in the dashboard
+        sync: false
+
+      - key: JWT_SECRET
+        generateValue: true     # Render will auto-generate a secure random value
+
+      - key: GOOGLE_CLIENT_ID
+        sync: false             # Set in dashboard
+
+      - key: FRONTEND_URL
+        value: https://atom-quest-2026.vercel.app
+
+      - key: EMAIL_USER
+        sync: false
+
+      - key: EMAIL_PASS
+        sync: false
+
+    # Optional: mount a disk for ephemeral storage (not needed; we use PostgreSQL)
+    # disk:
+    #   name: atomquest-data
+    #   mountPath: /data
+    #   sizeGB: 1
+
+  # ── PostgreSQL Database ────────────────────────────────────
+  - type: pserv                 # Render managed PostgreSQL
+    name: atomquest-db
+    plan: free                  # 256 MB RAM, 1 GB storage on free plan
+    databaseName: atomquest
+    user: atomquest_user
+    region: singapore
