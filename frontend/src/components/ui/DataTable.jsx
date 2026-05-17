@@ -1,12 +1,24 @@
+import { motion, AnimatePresence } from 'framer-motion';
 import { SkeletonRow } from './Skeleton';
 import { EmptyState, ErrorState } from './FeedbackStates';
+
+const rowVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: (i) => ({
+    opacity: 1, y: 0,
+    transition: { delay: i * 0.04, duration: 0.3, ease: [0.16, 1, 0.3, 1] },
+  }),
+};
 
 export const DataTable = ({ columns, data, loading, error, onRetry, emptyMessage }) => {
   if (loading) {
     return (
-      <div className="card overflow-hidden">
-        {/* Ghost header */}
-        <div className="flex items-center gap-4 px-5 py-4 border-b border-white/5 bg-white/2">
+      <div
+        className="rounded-2xl overflow-hidden border border-white/[0.06]"
+        style={{ background: 'rgba(12,18,32,0.8)', backdropFilter: 'blur(20px)' }}
+      >
+        <div className="flex items-center gap-4 px-5 py-4 border-b border-white/[0.05]"
+          style={{ background: 'rgba(99,102,241,0.04)' }}>
           {columns.map((_, i) => (
             <div key={i} className="flex-1 h-3 bg-white/5 rounded shimmer" />
           ))}
@@ -20,19 +32,18 @@ export const DataTable = ({ columns, data, loading, error, onRetry, emptyMessage
   if (!data?.length) return <EmptyState message={emptyMessage || 'No records found'} />;
 
   return (
-    <div className="card overflow-hidden overflow-x-auto">
+    <div
+      className="rounded-2xl overflow-hidden overflow-x-auto border border-white/[0.06]"
+      style={{ background: 'rgba(12,18,32,0.8)', backdropFilter: 'blur(20px)' }}
+    >
       <table className="w-full text-left text-sm whitespace-nowrap">
         <thead>
-          <tr>
+          <tr style={{ background: 'rgba(99,102,241,0.05)' }}>
             {columns.map((col, idx) => (
               <th
                 key={idx}
-                className="
-                  px-5 py-3.5 text-left
-                  text-[11px] font-semibold text-slate-500 uppercase tracking-widest
-                  border-b border-white/5 bg-white/2
-                  first:rounded-tl-xl last:rounded-tr-xl
-                "
+                className="px-5 py-3.5 text-left border-b border-white/[0.05]"
+                style={{ color: '#475569', fontSize: '11px', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase' }}
               >
                 {col.label}
               </th>
@@ -40,23 +51,26 @@ export const DataTable = ({ columns, data, loading, error, onRetry, emptyMessage
           </tr>
         </thead>
         <tbody>
-          {data.map((row, i) => (
-            <tr
-              key={i}
-              className={`
-                border-b border-white/4 last:border-0
-                hover:bg-indigo-500/4 transition-colors duration-150
-                animate-fade-up
-              `}
-              style={{ animationDelay: `${i * 30}ms`, opacity: 0 }}
-            >
-              {columns.map((col, idx) => (
-                <td key={idx} className="px-5 py-3.5 text-slate-300">
-                  {col.render ? col.render(row) : row[col.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
+          <AnimatePresence>
+            {data.map((row, i) => (
+              <motion.tr
+                key={i}
+                custom={i}
+                variants={rowVariants}
+                initial="hidden"
+                animate="visible"
+                className="border-b border-white/[0.04] last:border-0 transition-colors duration-150 group"
+                style={{ cursor: 'default' }}
+                whileHover={{ backgroundColor: 'rgba(99,102,241,0.04)' }}
+              >
+                {columns.map((col, idx) => (
+                  <td key={idx} className="px-5 py-3.5 text-slate-300 text-sm">
+                    {col.render ? col.render(row) : row[col.key]}
+                  </td>
+                ))}
+              </motion.tr>
+            ))}
+          </AnimatePresence>
         </tbody>
       </table>
     </div>
