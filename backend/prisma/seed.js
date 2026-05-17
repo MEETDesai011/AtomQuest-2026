@@ -3,6 +3,12 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function main() {
+  const existingUsers = await prisma.user.count();
+  if (existingUsers > 0) {
+    console.log('🌱 Database already contains data. Skipping seed to prevent duplicates.');
+    return;
+  }
+
   console.log('🌱 Seeding AtomQuest Database with rich demo data...');
 
   const hash = await bcrypt.hash('password123', 10);
