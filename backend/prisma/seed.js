@@ -20,6 +20,12 @@ async function main() {
     create: { name: 'Sarah Smith', email: 'sarah.manager@atomquest.com', passwordHash: hash, role: 'MANAGER', department: 'Engineering' },
   });
 
+  const managerGeneric = await prisma.user.upsert({
+    where: { email: 'manager@atomquest.com' },
+    update: {},
+    create: { name: 'Sarah Smith', email: 'manager@atomquest.com', passwordHash: hash, role: 'MANAGER', department: 'Engineering' },
+  });
+
   const managerSales = await prisma.user.upsert({
     where: { email: 'david.park@atomquest.com' },
     update: {},
@@ -30,6 +36,12 @@ async function main() {
     where: { email: 'lisa.chen@atomquest.com' },
     update: {},
     create: { name: 'Lisa Chen', email: 'lisa.chen@atomquest.com', passwordHash: hash, role: 'MANAGER', department: 'HR' },
+  });
+
+  const empGeneric = await prisma.user.upsert({
+    where: { email: 'employee@atomquest.com' },
+    update: {},
+    create: { name: 'John Doe', email: 'employee@atomquest.com', passwordHash: hash, role: 'EMPLOYEE', department: 'Engineering', managerId: managerGeneric.id },
   });
 
   const emp1 = await prisma.user.upsert({
