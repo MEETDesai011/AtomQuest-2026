@@ -37,7 +37,9 @@ const app = express();
 // ──────────────────────────────────────────────
 // Security hardening
 // ──────────────────────────────────────────────
-app.use(helmet());
+app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+}));
 
 // Render sits behind a proxy — trust the first hop so
 // express-rate-limit reads the real client IP correctly.
@@ -144,7 +146,7 @@ const prisma = new PrismaClient({
 const { sendSuccess } = require('./utils/response');
 
 // Public-ish route: any authenticated user can get cycles
-app.get('/api/v1/cycles', requireAuth, async (req, res, next) => {
+app.get(['/api/v1/cycles', '/cycles'], requireAuth, async (req, res, next) => {
   try {
     const cycles = await prisma.goalCycle.findMany({ orderBy: { createdAt: 'desc' } });
     return sendSuccess(res, cycles, 'Cycles retrieved');
@@ -162,11 +164,22 @@ const adminRoutes       = require('./routes/admin.routes');
 const analyticsRoutes   = require('./routes/analytics.routes');
 
 app.use('/api/v1/auth',         authLimiter, authRoutes);
+app.use('/auth',                authLimiter, authRoutes);
+
 app.use('/api/v1/goals',        goalRoutes);
+app.use('/goals',               goalRoutes);
+
 app.use('/api/v1/manager',      managerRoutes);
+app.use('/manager',             managerRoutes);
+
 app.use('/api/v1/achievements', achievementRoutes);
+app.use('/achievements',        achievementRoutes);
+
 app.use('/api/v1/admin',        adminRoutes);
+app.use('/admin',               adminRoutes);
+
 app.use('/api/v1/analytics',    analyticsRoutes);
+app.use('/analytics',           analyticsRoutes);
 
 // ──────────────────────────────────────────────
 // 404 catch-all
